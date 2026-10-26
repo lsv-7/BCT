@@ -1,0 +1,12 @@
+node_modules/
+.next/
+artifacts/
+.hardhat-cache/
+coverage/
+.env*
+!.env.example
+*.db
+*.db-journal
+private-uploads/
+deployments/localhost.json
+*.log

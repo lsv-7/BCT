@@ -1,0 +1,37 @@
+{
+  "name": "chainproof",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "next lint",
+    "test": "hardhat test && node --test test/app.test.cjs",
+    "chain": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.cjs --network localhost",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "demo:pdf": "node scripts/create-demo-pdf.cjs",
+    "demo:smoke": "node --env-file=.env scripts/smoke-demo.cjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "ethers": "^6.15.0",
+    "next": "^15.5.6",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@types/node": "^22.18.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.28",
+    "hardhat": "^2.26.3",
+    "prisma": "^6.19.0",
+    "typescript": "^5.9.3"
+  }
+}

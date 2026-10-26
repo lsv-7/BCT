@@ -1,0 +1,65 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const assert = require("node:assert/strict");
+const { Wallet } = require("ethers");
+const base = process.env.APP_URL || "http://localhost:3000";
+async function postForm(path, form, headers = {}) { const r=await fetch(base+path,{method:"POST",headers,body:form});const j=await r.json();assert.equal(r.ok,true,JSON.stringify(j));return j; }
+async function signIn(role, token) {
+  const r=await fetch(base+"/api/auth/demo",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({role,token})});
+  assert.equal(r.ok,true,await r.text());
+  const cookie=r.headers.get("set-cookie");assert.ok(cookie,"successful sign-in must issue an HttpOnly session cookie");
+  assert.match(cookie,/HttpOnly/i);assert.match(cookie,/SameSite=Strict/i);
+  return cookie.split(";")[0];
+}
+async function main() {
+  const publicList = await fetch(base + "/api/documents");
+  assert.equal(publicList.status, 403, "public callers must not list private application metadata");
+  const anonymousAdmin = await fetch(base + "/api/admin/dashboard");
+  assert.equal(anonymousAdmin.status, 403, "anonymous callers must not read administrator dashboards");
+  const anonymousIssuers = await fetch(base + "/api/admin/issuers");
+  assert.equal(anonymousIssuers.status, 403, "anonymous callers must not read issuer administration data");
+  const badLogin=await fetch(base+"/api/auth/demo",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({role:"admin",token:"wrong-token"})});
+  assert.equal(badLogin.status,403,"invalid local demo tokens must not create a session");
+  const adminCookie=await signIn("admin",process.env.DEMO_ADMIN_TOKEN);
+  const issuerCookie=await signIn("issuer",process.env.DEMO_ISSUER_TOKEN);
+  const wrongAdminRole = await fetch(base + "/api/admin/dashboard", { headers: { cookie: issuerCookie } });
+  assert.equal(wrongAdminRole.status,403,"issuer session must not access administrator dashboard data");
+  const wrongIssuerAdminRoute = await fetch(base + "/api/admin/issuers", { headers: { cookie: issuerCookie } });
+  assert.equal(wrongIssuerAdminRoute.status,403,"issuer session must not access issuer administration data");
+  new Wallet(process.env.DEMO_ADMIN_PRIVATE_KEY);
+  const issuerAddress = new Wallet(process.env.DEMO_ISSUER_PRIVATE_KEY).address;
+  const authorized = await fetch(base + "/api/admin/issuers", { method: "POST", headers: { "content-type": "application/json", cookie: adminCookie }, body: JSON.stringify({ address: issuerAddress, action: "authorize" }) });
+  assert.equal(authorized.ok, true, await authorized.text());
+  const bytes=fs.readFileSync("samples/demo-certificate.pdf");
+  const form=new FormData();form.set("title","ChainProof Demo Certificate");form.set("category","Academic Certificate");form.set("file",new Blob([bytes],{type:"application/pdf"}),"demo-certificate.pdf");
+  const doc=await postForm("/api/documents",form,{cookie:issuerCookie});
+  assert.equal("storageRef" in doc, false, "registration response must not disclose private storage references");
+  assert.equal("originalFilename" in doc, false, "registration response must not disclose original filenames");
+  const issuerListResponse=await fetch(base+"/api/documents",{headers:{cookie:issuerCookie}});
+  assert.equal(issuerListResponse.ok,true);
+  const issuerList=await issuerListResponse.json();
+  assert.equal(issuerList.docs[0].onChainExists,true,"dashboard must confirm rows against contract state");
+  assert.equal("storageRef" in issuerList.docs[0],false);
+  assert.equal("originalFilename" in issuerList.docs[0],false);
+  const uploadDir=path.resolve(process.env.UPLOAD_DIR||"./private-uploads");
+  const storedFiles=fs.readdirSync(uploadDir).filter(n=>n.endsWith(".pdf"));
+  const staticChecks=await Promise.all(storedFiles.map(n=>fetch(`${base}/private-uploads/${encodeURIComponent(n)}`)));
+  assert.ok(staticChecks.every(r=>r.status===404),"private upload files must not be served from static paths");
+  const verify=async (id,blob)=>{const f=new FormData();f.set("id",id);if(blob)f.set("file",blob,"check.pdf");const r=await fetch(base+"/api/verify",{method:"POST",body:f});return r.json();};
+  assert.equal((await verify(doc.id,new Blob([bytes],{type:"application/pdf"}))).status,"VALID");
+  const altered=Buffer.from(bytes);altered[altered.length-8]^=1;
+  assert.equal((await verify(doc.id,new Blob([altered],{type:"application/pdf"}))).status,"HASH_MISMATCH");
+  const revoke=await fetch(base+"/api/revoke",{method:"POST",headers:{"content-type":"application/json",cookie:issuerCookie},body:JSON.stringify({id:doc.id})});assert.equal(revoke.ok,true,await revoke.text());
+  assert.equal((await verify(doc.id,new Blob([bytes],{type:"application/pdf"}))).status,"REVOKED");
+  assert.equal((await verify("CP-UNKNOWN-DEMO")).status,"NOT_FOUND");
+  const publicRecord=await fetch(`${base}/api/documents?id=${encodeURIComponent(doc.id)}`).then(r=>r.json());
+  assert.equal(publicRecord.status,"REVOKED");
+  assert.equal("storageRef" in publicRecord,false);
+  assert.equal("originalFilename" in publicRecord,false);
+  const adminDashboard=await fetch(base+"/api/admin/dashboard",{headers:{cookie:adminCookie}}).then(r=>r.json());
+  assert.ok(adminDashboard.stats.revoked>=1,"admin dashboard revocation counts must reflect chain state");
+  assert.equal("storageRef" in adminDashboard.docs[0],false);
+  assert.equal("originalFilename" in adminDashboard.docs[0],false);
+  console.log(JSON.stringify({documentId:doc.id,hash:doc.sha256,transactionHash:doc.transactionHash,valid:"PASS",mismatch:"PASS",revoked:"PASS",unknown:"PASS",accessChecks:"PASS",privateFileExposure:"PASS",chainDashboardStatus:"PASS"},null,2));
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

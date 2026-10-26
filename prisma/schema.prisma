@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id               String   @id
+  title            String
+  category         String
+  originalFilename String
+  sha256           String
+  issuerAddress    String
+  timestamp        DateTime @default(now())
+  network          String
+  transactionHash  String
+  storageRef       String
+  revoked          Boolean  @default(false)
+
+  @@index([issuerAddress])
+}
+
+model Issuer {
+  address   String   @id
+  status    String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actor     String
+  action    String
+  target    String
+  timestamp DateTime @default(now())
+}
